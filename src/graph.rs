@@ -22,7 +22,7 @@ where
         .try_for_each(|node| -> Result<(), Cycle<T>> {
             dfs(
                 node.clone(),
-                &graph,
+                graph,
                 &mut visited,
                 &mut path_set,
                 &mut path_vec,

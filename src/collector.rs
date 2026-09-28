@@ -79,11 +79,7 @@ impl Collector {
     }
 
     pub fn jobs(&self) -> Vec<JobConfig> {
-        self.job_registry
-            .borrow()
-            .iter()
-            .map(|(_job_id, job_config)| job_config.clone())
-            .collect()
+        self.job_registry.borrow().values().cloned().collect()
     }
 
     /// Evaluate one Starlark file, recursively resolving its load() statements.
@@ -125,14 +121,14 @@ impl Collector {
 
         let modules_map = modules.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
-        let mut loader = ReturnFileLoader {
+        let loader = ReturnFileLoader {
             modules: &modules_map,
         };
 
         let result = Module::with_temp_heap(|module| -> anyhow::Result<FrozenModule> {
             {
                 let mut eval = Evaluator::new(&module);
-                eval.set_loader(&mut loader);
+                eval.set_loader(&loader);
                 eval.extra = Some(self);
                 eval.eval_module(ast, &self.globals)
                     .map_err(|e| anyhow::anyhow!("failed to evaluate module:\n{}", e))?;
@@ -227,10 +223,7 @@ impl TryInto<Config> for Collector {
             .map(|(_, job)| job)
             .collect::<Vec<JobConfig>>();
 
-        let config = Config {
-            pipelines: pipelines,
-            jobs: jobs,
-        };
+        let config = Config { pipelines, jobs };
 
         Ok(config)
     }
@@ -379,28 +372,22 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
             architecture: ImagePlatformArchitecture::from(arch),
             os: ImagePlatformOs::from(os),
         };
-        match platform.architecture {
-            ImagePlatformArchitecture::OTHER(arch) => {
-                return Err(starlark::Error::new_other(anyhow::anyhow!(
-                    "Unsupported architecture: {}",
-                    arch
-                )));
-            }
-            _ => {}
+
+        if let ImagePlatformArchitecture::OTHER(arch) = platform.architecture {
+            let e =
+                starlark::Error::new_other(anyhow::anyhow!("Unsupported architecture: {}", arch));
+            return Err(e);
         }
-        match platform.os {
-            ImagePlatformOs::OTHER(os) => {
-                return Err(starlark::Error::new_other(anyhow::anyhow!(
-                    "Unsupported OS: {}",
-                    os
-                )));
-            }
-            _ => {}
+
+        if let ImagePlatformOs::OTHER(os) = platform.os {
+            let e = starlark::Error::new_other(anyhow::anyhow!("Unsupported OS: {}", os));
+            return Err(e);
         }
+
         Ok(ImageVal {
             inner: ImageConfig {
-                manifest_ref: manifest_ref,
-                platform: platform,
+                manifest_ref,
+                platform,
             },
         })
     }
@@ -491,10 +478,11 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
                     } else if let Some(need) = NeedVal::from_value(item) {
                         need.inner
                     } else {
-                        return Err(starlark::Error::new_other(anyhow::anyhow!(
+                        let e = starlark::Error::new_other(anyhow::anyhow!(
                             "Job.needs: expected Need or Job, got {}",
                             item.get_type()
-                        )));
+                        ));
+                        return Err(e);
                     };
 
                     needs_set.insert(need);
@@ -599,10 +587,11 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
                     } else if let Some(need) = NeedVal::from_value(item) {
                         needs_set.insert(need.inner);
                     } else {
-                        return Err(starlark::Error::new_other(anyhow::anyhow!(
+                        let e = starlark::Error::new_other(anyhow::anyhow!(
                             "Pipeline.needs: expected Need or Job, got {}",
                             item.get_type()
-                        )));
+                        ));
+                        return Err(e);
                     }
                 }
             }
