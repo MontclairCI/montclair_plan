@@ -5,8 +5,6 @@ use std::fmt;
 use std::path::Path;
 
 use allocative::Allocative;
-use muzanci_image::image::ImagePlatform;
-use muzanci_image::image::ImagePlatformOs;
 use starlark::any::ProvidesStaticType;
 use starlark::environment::FrozenModule;
 use starlark::environment::Globals;
@@ -28,7 +26,9 @@ use starlark::values::list::UnpackList;
 use starlark::values::none::NoneType;
 use starlark_derive::starlark_value;
 
+use muzanci_image::image::ImagePlatform;
 use muzanci_image::image::ImagePlatformArchitecture;
+use muzanci_image::image::ImagePlatformOs;
 use muzanci_image::manifest_ref::ManifestRef;
 
 use crate::config::Config;
@@ -40,7 +40,6 @@ use crate::config::NeedConfig;
 use crate::config::PipelineConfig;
 use crate::config::PipelineId;
 use crate::config::StepConfig;
-use crate::config::StepId;
 use crate::config::WhenConfig;
 use crate::graph::Graph;
 use crate::graph::reachable;
@@ -176,7 +175,7 @@ impl TryInto<Config> for Collector {
     type Error = anyhow::Error;
 
     fn try_into(self) -> Result<Config, Self::Error> {
-        let pipelines = self.pipelines.into_inner();
+        let mut pipelines = self.pipelines.into_inner();
         let job_registry = self.job_registry.into_inner();
         let job_needs = self.job_needs.into_inner();
         let job_needed_bys = self.job_needed_bys.into_inner();
@@ -187,7 +186,7 @@ impl TryInto<Config> for Collector {
             let mut reachable_job_ids = HashSet::new();
 
             pipelines
-                .iter()
+                .iter_mut()
                 .try_for_each(|pipeline| -> anyhow::Result<()> {
                     let job_ids = pipeline
                         .needs
@@ -213,6 +212,7 @@ impl TryInto<Config> for Collector {
                         )
                     })?;
 
+                    pipeline.jobs = job_ids.iter().cloned().collect();
                     reachable_job_ids.extend(job_ids);
 
                     Ok(())
@@ -414,10 +414,8 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
         #[starlark(default = NoneType)]
         uses: Value<'v>,
     ) -> starlark::Result<StepVal> {
-        let step_id = StepId::new();
-
         let name = if name.is_empty() {
-            format!("step-{}", step_id)
+            command.to_owned()
         } else {
             name.to_owned()
         };
@@ -439,7 +437,6 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
 
         Ok(StepVal {
             inner: StepConfig {
-                step_id,
                 name,
                 command: command.to_owned(),
                 image,
@@ -641,6 +638,7 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
             name,
             when,
             needs,
+            jobs: Vec::new(),
         };
 
         eval.extra

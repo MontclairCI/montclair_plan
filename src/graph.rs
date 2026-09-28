@@ -13,11 +13,10 @@ where
     T: Clone + Eq + std::hash::Hash,
 {
     let mut reachable = HashSet::new();
-
-    // Forwards pass to capture reachable jobs from the pipeline's needs
     let mut visited = HashSet::new();
     let mut path_set = HashSet::new();
     let mut path_vec = Vec::new();
+
     source_nodes
         .iter()
         .try_for_each(|node| -> Result<(), Cycle<T>> {

@@ -33,41 +33,28 @@ pub struct ImageConfig {
 )]
 #[serde(transparent)]
 #[sqlx(transparent)]
-pub struct StepId(Uuid);
+pub struct StepIndex(i64);
 
-impl StepId {
-    pub fn new() -> Self {
-        Self(Uuid::now_v7())
-    }
-}
-
-impl std::fmt::Display for StepId {
+impl std::fmt::Display for StepIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<Uuid> for StepId {
-    fn from(uuid: Uuid) -> Self {
-        Self(uuid)
+impl From<i64> for StepIndex {
+    fn from(x: i64) -> Self {
+        Self(x)
     }
 }
 
-impl From<StepId> for Uuid {
-    fn from(id: StepId) -> Self {
-        id.0
+impl From<StepIndex> for i64 {
+    fn from(step_index: StepIndex) -> Self {
+        step_index.0
     }
 }
 
-impl TryFrom<&str> for StepId {
-    type Error = uuid::Error;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Ok(Self(Uuid::try_parse(s)?))
-    }
-}
-
-impl std::ops::Deref for StepId {
-    type Target = Uuid;
+impl std::ops::Deref for StepIndex {
+    type Target = i64;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -76,7 +63,6 @@ impl std::ops::Deref for StepId {
 /// A step to be executed in a job sandbox.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepConfig {
-    pub step_id: StepId,
     pub name: String,
     pub command: String,
     pub image: Option<ImageConfig>,
@@ -255,6 +241,7 @@ pub struct PipelineConfig {
     pub when: Vec<WhenConfig>,
     pub needs: Vec<NeedConfig>,
     pub pipeline_id: PipelineId,
+    pub jobs: Vec<JobId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
