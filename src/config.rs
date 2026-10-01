@@ -27,6 +27,7 @@ pub struct ImageConfig {
     PartialEq,
     Eq,
     Hash,
+    Default,
     Serialize,
     Deserialize,
     sqlx::Type
@@ -57,6 +58,13 @@ impl std::ops::Deref for StepIndex {
     type Target = i64;
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl std::ops::Add<i64> for StepIndex {
+    type Output = Self;
+    fn add(self, rhs: i64) -> Self::Output {
+        Self(self.0 + rhs)
     }
 }
 
@@ -188,6 +196,7 @@ pub enum WhenConfig {
     PartialEq,
     Eq,
     Hash,
+    Default,
     Serialize,
     Deserialize,
     sqlx::Type
