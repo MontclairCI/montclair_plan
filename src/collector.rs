@@ -5,6 +5,7 @@ use std::fmt;
 use std::path::Path;
 
 use allocative::Allocative;
+use muzanci_observability::TError;
 use starlark::any::ProvidesStaticType;
 use starlark::environment::FrozenModule;
 use starlark::environment::Globals;
@@ -84,9 +85,10 @@ impl Collector {
 
     /// Evaluate one Starlark file, recursively resolving its load() statements.
     /// Each loaded module is frozen before being made available to its importer.
-    pub fn evaluate(&self, path: &Path) -> anyhow::Result<FrozenModule> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("failed to read file [{}]:\n{}", path.display(), e))?;
+    pub fn evaluate(&self, path: &Path) -> Result<FrozenModule, TError> {
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            TError::new(&format!("failed to read file [{}]:\n{}", path.display(), e))
+        })?;
 
         // Enable f-strings, type annotations, and top-level statements (for/if at
         // module level) used in pipeline config files.
@@ -98,7 +100,11 @@ impl Collector {
         };
 
         let ast = AstModule::parse(&path.to_string_lossy(), content, &dialect).map_err(|e| {
-            anyhow::anyhow!("failed to parse file contents [{}]:\n{}", path.display(), e)
+            TError::new(&format!(
+                "failed to parse file contents [{}]:\n{}",
+                path.display(),
+                e
+            ))
         })?;
 
         // Collect all load() module IDs before the AST is consumed by eval_module.
@@ -125,23 +131,25 @@ impl Collector {
             modules: &modules_map,
         };
 
-        let result = Module::with_temp_heap(|module| -> anyhow::Result<FrozenModule> {
+        let result = Module::with_temp_heap(|module| -> Result<FrozenModule, TError> {
             {
                 let mut eval = Evaluator::new(&module);
                 eval.set_loader(&loader);
                 eval.extra = Some(self);
                 eval.eval_module(ast, &self.globals)
-                    .map_err(|e| anyhow::anyhow!("failed to evaluate module:\n{}", e))?;
+                    .map_err(|e| TError::new(&format!("failed to evaluate module:\n{}", e)))?;
             }
 
-            let module = module.freeze_named(FrozenHeapName::User(Box::new(
-                path.to_string_lossy().into_owned(),
-            )))?;
+            let module = module
+                .freeze_named(FrozenHeapName::User(Box::new(
+                    path.to_string_lossy().into_owned(),
+                )))
+                .map_err(|e| TError::new(&e.err_msg))?;
 
             Ok(module)
         });
 
-        result.map_err(|e| anyhow::anyhow!("{}: {}", path.display(), e))
+        result.map_err(|e| TError::new(&format!("{}: {}", path.display(), e)))
     }
 
     fn collect_job(&self, job: &JobConfig) {
@@ -168,7 +176,7 @@ impl Collector {
 }
 
 impl TryInto<Config> for Collector {
-    type Error = anyhow::Error;
+    type Error = TError;
 
     fn try_into(self) -> Result<Config, Self::Error> {
         let mut pipelines = self.pipelines.into_inner();
@@ -183,7 +191,7 @@ impl TryInto<Config> for Collector {
 
             pipelines
                 .iter_mut()
-                .try_for_each(|pipeline| -> anyhow::Result<()> {
+                .try_for_each(|pipeline| -> Result<(), TError> {
                     let job_ids = pipeline
                         .needs
                         .iter()
@@ -192,20 +200,18 @@ impl TryInto<Config> for Collector {
 
                     // Forwards pass to capture reachable jobs from the pipeline's needs.
                     let job_ids = reachable(&job_ids, &job_needs).map_err(|cycle| {
-                        anyhow::anyhow!(
+                        TError::new(&format!(
                             "Pipeline [{}] has a cycle in its job dependencies: {:?}",
-                            pipeline.name,
-                            cycle
-                        )
+                            pipeline.name, cycle,
+                        ))
                     })?;
 
                     // Backwards pass to capture all jobs that need reachable jobs.
                     let job_ids = reachable(&job_ids, &job_needed_bys).map_err(|cycle| {
-                        anyhow::anyhow!(
+                        TError::new(&format!(
                             "Pipeline [{}] has a cycle in its job dependencies: {:?}",
-                            pipeline.name,
-                            cycle
-                        )
+                            pipeline.name, cycle,
+                        ))
                     })?;
 
                     pipeline.jobs = job_ids.iter().cloned().collect();
@@ -367,20 +373,22 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
         #[starlark(require = named)] os: &str,
     ) -> starlark::Result<ImageVal> {
         let manifest_ref = ManifestRef::try_from(r#ref)
-            .map_err(|e| starlark::Error::new_other(anyhow::anyhow!(e)))?;
+            .map_err(|e| starlark::Error::new_other(TError::new(&e.to_string()).source()))?;
         let platform = ImagePlatform {
             architecture: ImagePlatformArchitecture::from(arch),
             os: ImagePlatformOs::from(os),
         };
 
         if let ImagePlatformArchitecture::OTHER(arch) = platform.architecture {
-            let e =
-                starlark::Error::new_other(anyhow::anyhow!("Unsupported architecture: {}", arch));
+            let e = starlark::Error::new_other(
+                TError::new(&format!("Unsupported architecture: {arch}")).source(),
+            );
             return Err(e);
         }
 
         if let ImagePlatformOs::OTHER(os) = platform.os {
-            let e = starlark::Error::new_other(anyhow::anyhow!("Unsupported OS: {}", os));
+            let e =
+                starlark::Error::new_other(TError::new(&format!("Unsupported OS: {os}")).source());
             return Err(e);
         }
 
@@ -412,10 +420,13 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
         } else {
             let image = ImageVal::from_value(uses)
                 .ok_or_else(|| {
-                    starlark::Error::new_other(anyhow::anyhow!(
-                        "Job.image: expected Image, got {}",
-                        uses.get_type()
-                    ))
+                    starlark::Error::new_other(
+                        TError::new(&format!(
+                            "Job.image: expected Image, got {}",
+                            uses.get_type(),
+                        ))
+                        .source(),
+                    )
                 })?
                 .inner
                 .clone();
@@ -444,10 +455,13 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
     ) -> starlark::Result<JobVal> {
         let image = ImageVal::from_value(uses)
             .ok_or_else(|| {
-                starlark::Error::new_other(anyhow::anyhow!(
-                    "Job.image: expected Image, got {}",
-                    uses.get_type()
-                ))
+                starlark::Error::new_other(
+                    TError::new(&format!(
+                        "Job.image: expected Image, got {}",
+                        uses.get_type(),
+                    ))
+                    .source(),
+                )
             })?
             .inner
             .clone();
@@ -456,10 +470,13 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
             let mut steps_vec: Vec<StepConfig> = Vec::new();
             for item in steps.iterate(eval.heap())? {
                 let s = StepVal::from_value(item).ok_or_else(|| {
-                    starlark::Error::new_other(anyhow::anyhow!(
-                        "Job.steps: expected Step, got {}",
-                        item.get_type()
-                    ))
+                    starlark::Error::new_other(
+                        TError::new(&format!(
+                            "Job.steps: expected Step, got {}",
+                            item.get_type(),
+                        ))
+                        .source(),
+                    )
                 })?;
                 steps_vec.push(s.inner.clone());
             }
@@ -478,10 +495,13 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
                     } else if let Some(need) = NeedVal::from_value(item) {
                         need.inner
                     } else {
-                        let e = starlark::Error::new_other(anyhow::anyhow!(
-                            "Job.needs: expected Need or Job, got {}",
-                            item.get_type()
-                        ));
+                        let e = starlark::Error::new_other(
+                            TError::new(&format!(
+                                "Job.needs: expected Need or Job, got {}",
+                                item.get_type(),
+                            ))
+                            .source(),
+                        );
                         return Err(e);
                     };
 
@@ -512,11 +532,11 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
 
         eval.extra
             .ok_or_else(|| {
-                starlark::Error::new_other(anyhow::anyhow!("no Collector in eval.extra"))
+                starlark::Error::new_other(TError::new("no Collector in eval.extra").source())
             })?
             .downcast_ref::<Collector>()
             .ok_or_else(|| {
-                starlark::Error::new_other(anyhow::anyhow!("eval.extra is not a Collector"))
+                starlark::Error::new_other(TError::new("eval.extra is not a Collector").source())
             })?
             .collect_job(&job);
 
@@ -587,10 +607,13 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
                     } else if let Some(need) = NeedVal::from_value(item) {
                         needs_set.insert(need.inner);
                     } else {
-                        let e = starlark::Error::new_other(anyhow::anyhow!(
-                            "Pipeline.needs: expected Need or Job, got {}",
-                            item.get_type()
-                        ));
+                        let e = starlark::Error::new_other(
+                            TError::new(&format!(
+                                "Pipeline.needs: expected Need or Job, got {}",
+                                item.get_type(),
+                            ))
+                            .source(),
+                        );
                         return Err(e);
                     }
                 }
@@ -603,10 +626,13 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
             if !when.is_none() {
                 for item in when.iterate(eval.heap())? {
                     let r = WhenVal::from_value(item).ok_or_else(|| {
-                        starlark::Error::new_other(anyhow::anyhow!(
-                            "Pipeline.when: expected When, got {}",
-                            item.get_type()
-                        ))
+                        starlark::Error::new_other(
+                            TError::new(&format!(
+                                "Pipeline.when: expected When, got {}",
+                                item.get_type(),
+                            ))
+                            .source(),
+                        )
                     })?;
                     when_set.insert(r.inner.clone());
                 }
@@ -632,11 +658,11 @@ pub fn predefined_primitives(builder: &mut GlobalsBuilder) {
 
         eval.extra
             .ok_or_else(|| {
-                starlark::Error::new_other(anyhow::anyhow!("no Collector in eval.extra"))
+                starlark::Error::new_other(TError::new("no Collector in eval.extra").source())
             })?
             .downcast_ref::<Collector>()
             .ok_or_else(|| {
-                starlark::Error::new_other(anyhow::anyhow!("eval.extra is not a Collector"))
+                starlark::Error::new_other(TError::new("eval.extra is not a Collector").source())
             })?
             .collect_pipeline(&pipeline);
 

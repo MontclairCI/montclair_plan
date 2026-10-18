@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use muzanci_git::GitCommitSha;
 use muzanci_git::GitRemote;
+use muzanci_observability::TError;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -380,25 +381,25 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_file(input: &Path, env: &Env) -> anyhow::Result<Self> {
+    pub fn from_file(input: &Path, env: &Env) -> Result<Self, TError> {
         let collector = Collector::new(env);
 
         collector
             .evaluate(input)
-            .map_err(|e| anyhow::anyhow!("failed to evaluate {}:\n{}", input.display(), e))?;
+            .map_err(|e| TError::new(&format!("failed to evaluate {}:\n{}", input.display(), e)))?;
 
         collector
             .try_into()
-            .map_err(|e| anyhow::anyhow!("failed to convert Collector into Config: {}", e))
+            .map_err(|e| TError::new(&format!("failed to convert Collector into Config: {}", e)))
     }
 
     pub fn to_ascii_graph(&self) -> String {
         unimplemented!();
     }
 
-    pub fn to_json(&self) -> anyhow::Result<String> {
+    pub fn to_json(&self) -> Result<String, TError> {
         serde_json::to_string_pretty(self)
-            .map_err(|e| anyhow::anyhow!("failed to serialize Config to JSON: {}", e))
+            .map_err(|e| TError::new(&format!("failed to serialize Config to JSON: {}", e)))
     }
 
     pub fn to_dot_graph(&self) -> String {
