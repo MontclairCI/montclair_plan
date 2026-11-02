@@ -268,6 +268,7 @@ pub struct TriggerConfig {
     PartialEq,
     Eq,
     Hash,
+    Default,
     Serialize,
     Deserialize,
     sqlx::Type
