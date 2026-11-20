@@ -1,5 +1,5 @@
 [package]
-name = "muzanci-config"
+name = "montclair_plan"
 version = "0.1.0"
 edition = "2024"
 
@@ -20,14 +20,14 @@ starlark_derive = "0.14.2"
 strum = { version = "0.28.0", features = ["derive"] }
 url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.23.4", features = ["serde", "v7"] }
-muzanci-observability = { path = "../muzanci-observability" }
-muzanci-image = { path = "../muzanci-image" }
-muzanci-git = { path = "../muzanci-git" }
+montclair_observability = { git = "https://github.com/MontclairCI/montclair_observability.git" }
+montclair_container = { git = "https://github.com/MontclairCI/montclair_container.git" }
+montclair_git = { git = "https://github.com/MontclairCI/montclair_git.git" }
 sqlx = { version = "0.9.0", features = ["derive"] }
 anyhow = "1.0.104"
 
 [lib]
-name = "muzanci_config"
+name = "montclair_plan"
 path = "src/lib.rs"
 
 [lints.clippy]

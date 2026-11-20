@@ -1,14 +1,14 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use muzanci_git::GitCommitSha;
-use muzanci_git::GitRemote;
-use muzanci_observability::TError;
+use montclair_git::GitCommitSha;
+use montclair_git::GitRemote;
+use montclair_observability::TError;
 use serde::Deserialize;
 use serde::Serialize;
 
-use muzanci_image::image::ImagePlatform;
-use muzanci_image::manifest_ref::ManifestRef;
+use montclair_container::image::ImagePlatform;
+use montclair_container::manifest_ref::ManifestRef;
 use uuid::Uuid;
 
 use crate::collector::Collector;
